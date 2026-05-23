@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 
 # =========================
-# CARREGAR .ENV
+# LOAD ENV
 # =========================
 load_dotenv()
 
@@ -25,6 +25,11 @@ client = OpenAI(
 INSTANCE_ID = os.getenv("ZAPI_INSTANCE_ID")
 TOKEN = os.getenv("ZAPI_TOKEN")
 CLIENT_TOKEN = os.getenv("CLIENT_TOKEN")
+
+# =========================
+# MEMÓRIA DAS CONVERSAS
+# =========================
+memoria_conversas = {}
 
 # =========================
 # WEBHOOK
@@ -52,11 +57,11 @@ def webhook():
         mensagem = data['text']['message']
         telefone = data['phone']
 
-        # RESPONDE APENAS COMANDO !english
+        # RESPONDE SOMENTE !english
         if not mensagem.lower().startswith("!english"):
             return "ok", 200
 
-        # REMOVE O COMANDO
+        # REMOVE COMANDO
         mensagem_usuario = (
             mensagem
             .replace("!english", "")
@@ -67,11 +72,11 @@ def webhook():
         print("Mensagem usuário:", mensagem_usuario)
 
         # =========================
-        # IA
+        # CRIA MEMÓRIA DO USUÁRIO
         # =========================
-        resposta_ia = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
+        if telefone not in memoria_conversas:
+
+            memoria_conversas[telefone] = [
                 {
                     "role": "system",
                     "content": """
@@ -84,18 +89,33 @@ def webhook():
                     - Always continue the conversation
                     - Sound like a real person
                     - Encourage the student
+                    - Remember previous messages
 
                     If the sentence is wrong:
                     1. Show the correct version
                     2. Explain briefly
                     3. Continue the conversation naturally
                     """
-                },
-                {
-                    "role": "user",
-                    "content": mensagem_usuario
                 }
             ]
+
+        # SALVA MENSAGEM DO USUÁRIO
+        memoria_conversas[telefone].append(
+            {
+                "role": "user",
+                "content": mensagem_usuario
+            }
+        )
+
+        # LIMITAR HISTÓRICO
+        memoria_conversas[telefone] = memoria_conversas[telefone][-10:]
+
+        # =========================
+        # IA
+        # =========================
+        resposta_ia = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=memoria_conversas[telefone]
         )
 
         resposta = resposta_ia.choices[0].message.content
@@ -104,6 +124,14 @@ def webhook():
         print("RESPOSTA IA:")
         print(resposta)
         print("====================\n")
+
+        # SALVA RESPOSTA DA IA
+        memoria_conversas[telefone].append(
+            {
+                "role": "assistant",
+                "content": resposta
+            }
+        )
 
         # =========================
         # ENVIO WHATSAPP
@@ -142,7 +170,6 @@ def webhook():
         print("====================\n")
 
         return "erro", 500
-
 
 # =========================
 # START APP
